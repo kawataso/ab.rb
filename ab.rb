@@ -2,12 +2,21 @@
 
 require 'optparse'
 require 'net/http'
+require 'uri'
 
 module ApacheBench
   class KeepAliveClient
-    SLEEP = 6
-    def initialize
-      @sleep = SLEEP
+    def initialize(host,port,path,sleep)
+      @host = host
+      @port = port
+      @path = path
+      @sleep = sleep
+
+      @stat = 'n'
+    end
+
+    def stat
+      @stat
     end
 
     def run
@@ -15,21 +24,26 @@ module ApacheBench
 
         while true do
           begin
-            http = Net::HTTP.new("mana-web-a-b-1.utagoe.net", 80)
+            http = Net::HTTP.new(@host, @port)
             # http.set_debug_output STDERR
             http.start do
               while true do
                 begin
-                  http.get("/chat2.php")
+                  http.get(@path)
+                  if @stat == 'c' then
+                    @stat = 'r'
+                  else
+                    @stat = 'k'
+                  end
                   sleep @sleep
                 rescue
-                  p "closed"
+                  @stat = "c"
                   break
                 end
               end
             end
           rescue
-            p "error"
+            @stat = "e"
             sleep @sleep
             next
           end
@@ -40,13 +54,42 @@ module ApacheBench
   end
 end
 
-n = 150
+CLIENTS = []
+OPTS = {}
+OPTS[:n] = 1
+OPTS[:s] = 4
+OPTS[:d] = -1
+OPTS[:u] = false
 
-n.times do
-  client = ApacheBench::KeepAliveClient.new
+opt = OptionParser.new
+opt.on('-n VAL'){|v| OPTS[:n] = v.to_i}
+opt.on('-s VAL'){|v| OPTS[:s] = v.to_i}
+opt.on('-u VAL'){|v| OPTS[:u] = v}
+opt.on('-d VAL'){|v| OPTS[:d] = v.to_f}
+
+opt.parse!(ARGV)
+
+OPTS[:u] = ARGV.shift if ARGV.size > 0
+
+if OPTS[:d] == -1 then
+  OPTS[:d] = OPTS[:s].to_f / OPTS[:n]
+end
+
+raise "no target URL present." if !OPTS[:u]
+
+uri = URI(OPTS[:u])
+
+OPTS[:n].times do
+  client = ApacheBench::KeepAliveClient.new(uri.host,uri.port,uri.path,OPTS[:s])
+  CLIENTS.push(client)
   client.run()
+  sleep OPTS[:d]
 end
 
 while true do
-  sleep 5
+  CLIENTS.each do |c|
+    print c.stat
+  end
+  print "\n"
+  sleep OPTS[:s]
 end
